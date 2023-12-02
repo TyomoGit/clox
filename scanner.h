@@ -44,5 +44,6 @@ typedef struct Token {
 /// @brief Scannerを初期化する
 /// @param source ソースコード
 void init_scanner(const char* source);
+Token scan_token();
 
 #endif
