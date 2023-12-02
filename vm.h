@@ -39,7 +39,7 @@ void free_vm();
 /// @brief 命令の配列を実行する
 /// @param chunk 命令の配列
 /// @return 結果
-InterpretResult interpret(Chunk* chunk);
+InterpretResult interpret(const char* source);
 
 /// @brief スタックにValueをプッシュする
 /// @param value プッシュするValue
