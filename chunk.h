@@ -1,0 +1,52 @@
+// コードの実行単位であるチャンクを表す構造体を定義する
+
+#ifndef CLOX_CHUNK_H
+#define CLOX_CHUNK_H
+
+#include "common.h"
+#include "value.h"
+
+typedef enum {
+    // 定数を生成する
+    OP_CONSTANT,
+    // 加算
+    OP_ADD,
+    // 減算
+    OP_SUBTRACT,
+    // 乗算
+    OP_MULTIPLY,
+    // 除算
+    OP_DIVIDE,
+    // -
+    OP_NEGATE,
+    // 関数を抜ける命令
+    OP_RETURN,
+} OpCode;
+
+// 動的配列
+typedef struct {
+    // 実際に格納されている要素の数
+    int count;
+    // 配列の容量
+    int capacity;
+    // バイトコードの配列
+    uint8_t* code;
+    // 行番号の配列
+    int* lines;
+    // 定数を格納する配列
+    ValueArray constants;
+} Chunk;
+
+// チャンクを初期化する
+void init_chunk(Chunk* chunk);
+
+// チャンクの末尾に1バイトを追加する
+void write_chunk(Chunk* chunk, uint8_t byte, int line);
+
+// チャンクの定数部に新しい定数を書き込む
+int add_constant(Chunk* chunk, Value value);
+
+// チャンクを解放する
+void free_chunk(Chunk* chunk);
+
+#endif //CLOX_CHUNK_H
