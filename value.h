@@ -45,6 +45,11 @@ typedef struct {
     Value* values;
 } ValueArray;
 
+/// @brief 等価を判定する
+/// @param a 判定される値
+/// @param b 判定される値
+/// @return 等価かどうか
+bool values_equal(Value a, Value b);
 
 /// @brief ValueArrayを初期化する
 /// @param array 

@@ -15,6 +15,12 @@ typedef enum {
     OP_TRUE,
     // falseプッシュする
     OP_FALSE,
+    // ==
+    OP_EQUAL,
+    // >
+    OP_GREATER,
+    // <
+    OP_LESS,
     // 加算
     OP_ADD,
     // 減算
@@ -23,7 +29,9 @@ typedef enum {
     OP_MULTIPLY,
     // 除算
     OP_DIVIDE,
-    // -
+    // 否定の !
+    OP_NOT,
+    // 単項-
     OP_NEGATE,
     // 関数を抜ける命令
     OP_RETURN,

@@ -36,7 +36,29 @@ void free_vm() {
 
 }
 
-static Value peek(int distance);
+void push(Value value) {
+    *vm.stack_top = value;
+    vm.stack_top += 1;
+}
+
+Value pop() {
+    vm.stack_top -= 1;
+    return *vm.stack_top;
+}
+
+/// @brief スタックからポップせずにValueを返す
+/// @param distance スタックの一番上からどれだけ離れているか（0なら一番上）
+/// @return スタックの値
+static Value peek(int distance) {
+    return vm.stack_top[-1 - distance];
+}
+
+/// @brief 値が偽性かどうかを判定する
+/// @param value 判定される値
+/// @return 値が偽性かどうか
+static bool is_falsey(Value value) {
+    return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value));
+}
 
 /// @brief 仮想マシンを実行する
 /// @return 結果
@@ -83,6 +105,18 @@ static InterpretResult run() {
             case OP_FALSE:
                 push(BOOL_VAL(false));
                 break;
+            case OP_EQUAL: {
+                Value b = pop();
+                Value a = pop();
+                push(BOOL_VAL(values_equal(a, b)));
+                break;
+            }
+            case OP_GREATER:
+                BINARY_OP(BOOL_VAL, >);
+                break;
+            case OP_LESS:
+                BINARY_OP(BOOL_VAL, <);
+                break;
             case OP_ADD:
                 BINARY_OP(NUMBER_VAL, +);
                 break;
@@ -94,6 +128,9 @@ static InterpretResult run() {
                 break;
             case OP_DIVIDE:
                 BINARY_OP(NUMBER_VAL, /);
+                break;
+            case OP_NOT:
+                push(BOOL_VAL(is_falsey(pop())));
                 break;
             case OP_NEGATE:
                 if (!IS_NUMBER(peek(0))) {
@@ -132,21 +169,4 @@ InterpretResult interpret(const char* source) {
 
     free_chunk(&chunk);
     return result;
-}
-
-void push(Value value) {
-    *vm.stack_top = value;
-    vm.stack_top += 1;
-}
-
-Value pop() {
-    vm.stack_top -= 1;
-    return *vm.stack_top;
-}
-
-/// @brief スタックからポップせずにValueを返す
-/// @param distance スタックの一番上からどれだけ離れているか（0なら一番上）
-/// @return スタックの値
-static Value peek(int distance) {
-    return vm.stack_top[-1 - distance];
 }
