@@ -2,6 +2,14 @@
 #define CLOX_MEMORY_H
 
 #include "common.h"
+#include "object.h"
+
+// 型のメモリを指定した数分確保する
+#define ALLOCATE(type, count) \
+    (type*)reallocate(NULL, 0, sizeof(type) * (count))
+
+// 解放する
+#define FREE(type, pointer) reallocate(pointer, sizeof(type), 0)
 
 // 現在の容量か新しい容量を算出する
 #define GROW_CAPACITY(capacity) \
@@ -25,5 +33,8 @@
 // 0以外    , < old_size , 既存の割り当てを縮小する
 // 0以外    , > old_size , 既存の割り当てを拡大する
 void* reallocate(void* pointer, size_t old_size, size_t new_size);
+
+/// @brief 全てのオブジェクトを解放する
+void free_objects();
 
 #endif

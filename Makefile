@@ -1,28 +1,31 @@
-a.out: scanner.o memory.o vm.o debug.o main.o chunk.o compiler.o value.o 
-	gcc scanner.o memory.o vm.o debug.o main.o chunk.o compiler.o value.o -o a.out
+a.out: scanner.o object.o memory.o vm.o debug.o main.o chunk.o compiler.o value.o 
+	gcc scanner.o object.o memory.o vm.o debug.o main.o chunk.o compiler.o value.o -o a.out
 
-scanner.o: scanner.c scanner.h common.h 
+scanner.o: scanner.c common.h scanner.h 
 	gcc -c scanner.c -o scanner.o
 
-memory.o: memory.c memory.h 
+object.o: object.c memory.h object.h value.h vm.h 
+	gcc -c object.c -o object.o
+
+memory.o: memory.c memory.h vm.h 
 	gcc -c memory.c -o memory.o
 
-vm.o: vm.c common.h debug.h vm.h compiler.h 
+vm.o: vm.c debug.h object.h common.h memory.h vm.h compiler.h 
 	gcc -c vm.c -o vm.o
 
-debug.o: debug.c debug.h value.h 
+debug.o: debug.c value.h debug.h 
 	gcc -c debug.c -o debug.o
 
-main.o: main.c compiler.h vm.h common.h debug.h 
+main.o: main.c vm.h compiler.h common.h debug.h 
 	gcc -c main.c -o main.o
 
 chunk.o: chunk.c chunk.h memory.h 
 	gcc -c chunk.c -o chunk.o
 
-compiler.o: compiler.c scanner.h common.h compiler.h debug.h 
+compiler.o: compiler.c debug.h scanner.h common.h compiler.h 
 	gcc -c compiler.c -o compiler.o
 
-value.o: value.c memory.h value.h 
+value.o: value.c object.h value.h memory.h 
 	gcc -c value.c -o value.o
 
 run: a.out

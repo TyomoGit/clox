@@ -3,11 +3,18 @@
 
 #include "common.h"
 
+/// @brief あらゆるオブジェクト
+typedef struct Obj Obj;
+
+/// 文字列オブジェクト
+typedef struct ObjString ObjString;
+
 /// @brief VMが組み込みでサポートする型の種類
 typedef enum {
     VAL_BOOL,
     VAL_NIL,
     VAL_NUMBER,
+    VAL_OBJ,
 } ValueType;
 
 /// @brief VMが組み込みでサポートする型
@@ -16,20 +23,26 @@ typedef struct {
     union {
         bool boolean;
         double number;
+        Obj* obj;
     } as;
 } Value;
 
-// Valueがbooleanかどうかを判定する
-#define IS_BOOL(value) ((value).type == VAL_BOOL)
 // Valueがnilかどうかを判定する
 #define IS_NIL(value) ((value).type == VAL_NIL)
+// ValueがObjかどうかを判定する
+#define IS_OBJ(value) ((value).type == VAL_OBJ)
 // Valueがnumberかどうかを判定する
 #define IS_NUMBER(value) ((value).type == VAL_NUMBER)
+// Valueがbooleanかどうかを判定する
+#define IS_BOOL(value) ((value).type == VAL_BOOL)
 
+// ValueからObjへのポインタを生成する
+#define AS_OBJ(value) ((value).as.obj)
 // ValueからC言語のboolを生成する
 #define AS_BOOL(value) ((value).as.boolean)
 // ValueからC言語のdoubleを生成する
 #define AS_NUMBER(value) ((value).as.number)
+
 
 // Cの値をLoxのbooleanに変換する
 #define BOOL_VAL(value) ((Value){VAL_BOOL, {.boolean = value}})
@@ -37,6 +50,8 @@ typedef struct {
 #define NIL_VAL ((Value){VAL_NIL, {.number = 0}})
 // Cの値をLoxのnumberに変換する
 #define NUMBER_VAL(value) ((Value){VAL_NUMBER, {.number = value}})
+// ObjへのポインタをLoxオブジェクトに変換する
+#define OBJ_VAL(object) ((Value) {VAL_OBJ, {.obj = (Obj*) object}})
 
 /// @brief Valueの配列をもつ構造体
 typedef struct {

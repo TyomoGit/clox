@@ -21,6 +21,9 @@ typedef struct {
     Value stack[STACK_MAX];
     Value* stack_top;
 
+    //GC用の連結リスト
+    Obj* objects;
+
 } Vm;
 
 /// @brief 実行結果
@@ -29,6 +32,8 @@ typedef enum {
     INTERPRET_COMPILE_ERROR,
     INTERPRET_RUNTIME_ERROR,
 } InterpretResult;
+
+extern Vm vm;
 
 /// @brief 仮想マシンを初期化する
 void init_vm();
