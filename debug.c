@@ -3,6 +3,9 @@
 #include "debug.h"
 #include "value.h"
 
+/// @brief チャンクを逆アセンブルする
+/// @param chunk 対象のチャンク
+/// @param name 名前
 void disassemble_chunk(Chunk* chunk, const char* name) {
     printf("== %s ==\n", name);
 
@@ -11,11 +14,20 @@ void disassemble_chunk(Chunk* chunk, const char* name) {
     }
 }
 
+/// @brief 1バイトの命令を逆アセンブルする
+/// @param name 名前
+/// @param offset 開始位置
+/// @return 次の命令の開始位置
 static int simple_instruction(const char* name, int offset) {
     printf("%s\n", name);
     return offset + 1;
 }
 
+/// @brief 定数命令を逆アセンブルする
+/// @param name 名前
+/// @param chunk チャンク
+/// @param offset 開始位置
+/// @return 次の命令の開始位置
 static int constant_instruction(const char* name, Chunk* chunk, int offset) {
     uint8_t constant = chunk->code[offset + 1];
     printf("%-16s %4d \'", name, constant);
@@ -25,6 +37,10 @@ static int constant_instruction(const char* name, Chunk* chunk, int offset) {
 }
 
 
+/// @brief 命令を逆アセンブルする
+/// @param chunk チャンク
+/// @param offset 開始位置
+/// @return 
 int disassemble_instruction(Chunk* chunk, int offset) {
     printf("%04d ", offset);
 
@@ -38,6 +54,12 @@ int disassemble_instruction(Chunk* chunk, int offset) {
     switch (instruction) {
     case OP_CONSTANT:
         return constant_instruction("OP_CONSTANT", chunk, offset);
+    case OP_NIL:
+        return simple_instruction("OP_NIL", offset);
+    case OP_TRUE:
+        return simple_instruction("OP_TRUE", offset);
+    case OP_FALSE:
+        return simple_instruction("OP_FALSE", offset);
     case OP_ADD:
         return simple_instruction("OP_ADD", offset);
     case OP_SUBTRACT:

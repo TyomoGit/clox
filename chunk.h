@@ -9,6 +9,12 @@
 typedef enum {
     // 定数を生成する
     OP_CONSTANT,
+    // nilをプッシュする
+    OP_NIL,
+    // trueをプッシュする
+    OP_TRUE,
+    // falseプッシュする
+    OP_FALSE,
     // 加算
     OP_ADD,
     // 減算

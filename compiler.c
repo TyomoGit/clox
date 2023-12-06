@@ -5,6 +5,10 @@
 #include "compiler.h"
 #include "scanner.h"
 
+#ifdef DEBUG_PRINT_CODE
+#include "debug.h"
+#endif
+
 /// @brief パーサ
 typedef struct {
     /// @brief 現在の字句
@@ -78,6 +82,10 @@ static void error_at(Token* token, const char* message) {
     parser.had_error = true;
 }
 
+static void error(const char* message) {
+    error_at(&parser.previous, message);
+}
+
 /// @brief 現在の位置でエラーを報告する
 /// @param message エラーメッセージ
 static void error_at_current(const char* message) {
@@ -132,7 +140,17 @@ static void emit_return() {
 /// @brief コンパイルを終わる
 static void end_compiler() {
     emit_return();
+
+    #ifdef DEBUG_PRINT_CODE
+    if (!parser.had_error) {
+        // disassemble_chunk(current_chunk(), "code");
+    }
+    #endif
 }
+
+static void expression();
+static ParseRule* get_rule(TokenType type);
+static void parse_precedence(Precedence precedence);
 
 /// @brief 中置式を解析する
 static void binary() {
@@ -149,17 +167,27 @@ static void binary() {
     }
 }
 
+/// @brief リテラルを解析する
+static void literal() {
+    switch (parser.previous.type) {
+        case TOKEN_FALSE: emit_byte(OP_FALSE); break;
+        case TOKEN_NIL: emit_byte(OP_NIL); break;
+        case TOKEN_TRUE: emit_byte(OP_TRUE); break;
+        default: return; // unreachable
+    }
+}
+
 /// @brief 丸括弧で囲まれた式を解析する
 static void grouping() {
     expression();
-    consume(TOKEN_LEFT_PAREN, "Expect ')' after expression.");
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
 }
 
 /// @brief 値を定数表に追加する
 /// @param value 定数表に追加される値
 /// @return 追加した値のインデックス
 static uint8_t make_constant(Value value) { 
-    int constant = add_constant(value);
+    int constant = add_constant(current_chunk(), value);
     if (constant > UINT8_MAX) {
         error("Too many constants in one chunk.");
         return 0;
@@ -171,13 +199,13 @@ static uint8_t make_constant(Value value) {
 /// @brief 定数をロードするコードをチャンクに加える
 /// @param value 定数
 static void emit_constant(Value value) {
-    emit_bytes(OP_CONSTANT, make_constant(value))
+    emit_bytes(OP_CONSTANT, make_constant(value));
 }
 
 /// @brief 数値リテラルを解析する
 static void number() {
     double value = strtod(parser.previous.start, NULL);
-    emit_constant(value);
+    emit_constant(NUMBER_VAL(value));
 }
 
 static void unary() {
@@ -192,16 +220,81 @@ static void unary() {
     }
 }
 
+ParseRule rules[] = {
+    [TOKEN_LEFT_PAREN]    = {grouping, NULL,   PREC_NONE},
+    [TOKEN_RIGHT_PAREN]   = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_LEFT_BRACE]    = {NULL,     NULL,   PREC_NONE}, 
+    [TOKEN_RIGHT_BRACE]   = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_COMMA]         = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_DOT]           = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_MINUS]         = {unary,    binary, PREC_TERM},
+    [TOKEN_PLUS]          = {NULL,     binary, PREC_TERM},
+    [TOKEN_SEMICOLON]     = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_SLASH]         = {NULL,     binary, PREC_FACTOR},
+    [TOKEN_STAR]          = {NULL,     binary, PREC_FACTOR},
+    [TOKEN_BANG]          = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_BANG_EQUAL]    = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_EQUAL]         = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_EQUAL_EQUAL]   = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_GREATER]       = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_GREATER_EQUAL] = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_LESS]          = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_LESS_EQUAL]    = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_IDENTIFIER]    = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_STRING]        = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_NUMBER]        = {number,   NULL,   PREC_NONE},
+    [TOKEN_AND]           = {NULL,     NULL,   PREC_AND},
+    [TOKEN_CLASS]         = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_ELSE]          = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_FALSE]         = {literal,  NULL,   PREC_NONE},
+    [TOKEN_FOR]           = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_FUN]           = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_IF]            = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_NIL]           = {literal,  NULL,   PREC_NONE},
+    [TOKEN_OR]            = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_PRINT]         = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_RETURN]        = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_SUPER]         = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_THIS]          = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_TRUE]          = {literal,  NULL,   PREC_NONE},
+    [TOKEN_VAR]           = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_WHILE]         = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_ERROR]         = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_EOF]           = {NULL,     NULL,   PREC_NONE},
+};
+
 /// @brief 現在のトークンから，指定した優先度より上位の式を解析する
 /// @param precedence 
 static void parse_precedence(Precedence precedence) {
+    advance();
+    // 現在のトークンに対応する前置パーサを探索する
+    ParseFn prefix_rule = get_rule(parser.previous.type)->prefix;
+    if (prefix_rule == NULL) {
+        error("Expect expression.");
+        return;
+    }
 
+    prefix_rule();
+
+    // 後置パーサの探索
+    while (precedence <= get_rule(parser.current.type)->precedence) {
+        advance();
+        ParseFn infix_rule = get_rule(parser.previous.type)->infix;
+        infix_rule();
+    }
+}
+
+/// @brief TokenTypeに対応するルールを返却する
+/// @param type ルールに対応するTokenType
+/// @return TokenTypeに対応するルール
+static ParseRule* get_rule(TokenType type) {
+    return &rules[type];
 }
 
 /// @brief 式を解析する
 static void expression() {
     // 式全体を解析する
-    parse_precedence(PREC_ASSIGNMENT)
+    parse_precedence(PREC_ASSIGNMENT);
 }
 
 bool compile(const char* source, Chunk* chunk) {
