@@ -28,6 +28,8 @@ struct ObjString {
     Obj obj;
     int length;
     char* chars;
+    // 文字列のハッシュ
+    uint32_t hash;
 };
 
 /// @brief 文字列を所有する
@@ -36,6 +38,10 @@ struct ObjString {
 /// @return 
 ObjString* take_string(char* chars, int length);
 
+/// @brief 文字列をコピーする
+/// @param chars 
+/// @param length 
+/// @return 
 ObjString* copy_string(const char* chars, int length);
 
 /// @brief ヒープに割り当てたオブジェクトをプリントする

@@ -11,7 +11,7 @@
 // 解放する
 #define FREE(type, pointer) reallocate(pointer, sizeof(type), 0)
 
-// 現在の容量か新しい容量を算出する
+// 現在の容量から新しい容量を算出する
 #define GROW_CAPACITY(capacity) \
     ((capacity) < 8 ? 8 : (capacity) * 2)
 

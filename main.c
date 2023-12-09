@@ -53,6 +53,8 @@ static char* read_file(const char* path) {
     return buffer;
 }
 
+/// @brief ファイルを指定して実行する
+/// @param path ファイルパス
 static void run_file(const char* path) {
     char* source = read_file(path);
     InterpretResult result = interpret(source);

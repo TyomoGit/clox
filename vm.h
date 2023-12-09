@@ -6,6 +6,7 @@
 #define CLOX_VM_H
 
 #include "chunk.h"
+#include "table.h"
 #include "value.h"
 
 #define STACK_MAX (UINT8_MAX+1)
@@ -20,6 +21,9 @@ typedef struct {
 
     Value stack[STACK_MAX];
     Value* stack_top;
+
+    /// @brief インターン化された文字列の集合
+    Table strings;
 
     //GC用の連結リスト
     Obj* objects;
