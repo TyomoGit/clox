@@ -37,7 +37,7 @@ typedef enum {
 } Precedence;
 
 /// @brief 
-typedef void (*ParseFn)();
+typedef void (*ParseFn)(bool can_assign);
 
 /// @brief 解析ルール
 typedef struct {
@@ -118,6 +118,25 @@ static void consume(TokenType type, const char* message) {
     error_at_current(message);
 }
 
+/// @brief 現在のトークンが指定された型かどうかを返す
+/// @param type トークンの型
+/// @return 現在のトークンが指定された型かどうか
+static bool check(TokenType type) {
+    return parser.current.type == type;
+}
+
+/// @brief 現在のトークンが指定された型なら消費する
+/// @param type トークンの型
+/// @return 現在のトークンが指定された型かどうか
+static bool match(TokenType type) {
+    if (!check(type)) {
+        return false;
+    }
+
+    advance();
+    return true;
+}
+
 /// @brief バイトをチャンクに加える
 /// @param byte 加えるバイト
 static void emit_byte(uint8_t byte) {
@@ -149,11 +168,35 @@ static void end_compiler() {
 }
 
 static void expression();
+static void statement();
+static void declaration();
 static ParseRule* get_rule(TokenType type);
 static void parse_precedence(Precedence precedence);
+static uint8_t make_constant(Value value);
+
+/// @brief 定数部にトークンの字句を追加する
+/// @param name 定数部に追加する字句
+/// @return 定数部のインデックス
+static uint8_t identifier_constant(Token* name) {
+    return make_constant(OBJ_VAL(copy_string(name->start, name->length)));
+}
+
+/// @brief 変数を解析する
+/// @param error_message 
+/// @return 定数部のインデックス
+static uint8_t parse_variable(const char* error_message) {
+    consume(TOKEN_IDENTIFIER, error_message);
+    return identifier_constant(&parser.previous);
+}
+
+/// @brief 変数を定義する命令を登録する
+/// @param global 定数表における，グローバル変数の名前のインデックス 
+static void define_variable(uint8_t global) {
+    emit_bytes(OP_DEFINE_GLOBAL, global);
+}
 
 /// @brief 中置式を解析する
-static void binary() {
+static void binary(bool can_assign) {
     TokenType operator_type = parser.previous.type;
     ParseRule* rule = get_rule(operator_type);
     parse_precedence((Precedence)rule->precedence + 1);
@@ -174,7 +217,7 @@ static void binary() {
 }
 
 /// @brief リテラルを解析する
-static void literal() {
+static void literal(bool can_assign) {
     switch (parser.previous.type) {
         case TOKEN_FALSE: emit_byte(OP_FALSE); break;
         case TOKEN_NIL: emit_byte(OP_NIL); break;
@@ -184,7 +227,7 @@ static void literal() {
 }
 
 /// @brief 丸括弧で囲まれた式を解析する
-static void grouping() {
+static void grouping(bool can_assign) {
     expression();
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
 }
@@ -209,16 +252,34 @@ static void emit_constant(Value value) {
 }
 
 /// @brief 数値リテラルを解析する
-static void number() {
+static void number(bool can_assign) {
     double value = strtod(parser.previous.start, NULL);
     emit_constant(NUMBER_VAL(value));
 }
 
-static void string() {
+static void string(bool can_assign) {
     emit_constant(OBJ_VAL(copy_string(parser.previous.start + 1, parser.previous.length - 2)));
 }
 
-static void unary() {
+static void named_variable(Token name, bool can_assign) {
+    uint8_t arg = identifier_constant(&name);
+    
+    if (can_assign && match(TOKEN_EQUAL)) {
+        // set式（代入式）
+        expression();
+        emit_bytes(OP_SET_GLOBAL, arg);
+        // get式
+    } else {
+        emit_bytes(OP_GET_GLOBAL, arg);
+    }
+}
+
+/// @brief 識別子を解析する
+static void variable(bool can_assign) {
+    named_variable(parser.previous, can_assign);
+}
+
+static void unary(bool can_assign) {
     TokenType operator_type = parser.previous.type;
 
     // 被演算子をコンパイルする
@@ -251,8 +312,8 @@ ParseRule rules[] = {
     [TOKEN_GREATER_EQUAL] = {NULL,     binary, PREC_COMPARISON},
     [TOKEN_LESS]          = {NULL,     binary, PREC_COMPARISON},
     [TOKEN_LESS_EQUAL]    = {NULL,     binary, PREC_COMPARISON},
-    [TOKEN_IDENTIFIER]    = {NULL,   NULL,   PREC_NONE},
-    [TOKEN_STRING]        = {string,     NULL,   PREC_NONE},
+    [TOKEN_IDENTIFIER]    = {variable, NULL,   PREC_NONE},
+    [TOKEN_STRING]        = {string,   NULL,   PREC_NONE},
     [TOKEN_NUMBER]        = {number,   NULL,   PREC_NONE},
     [TOKEN_AND]           = {NULL,     NULL,   PREC_AND},
     [TOKEN_CLASS]         = {NULL,     NULL,   PREC_NONE},
@@ -285,13 +346,14 @@ static void parse_precedence(Precedence precedence) {
         return;
     }
 
-    prefix_rule();
+    bool can_assign = precedence <= PREC_ASSIGNMENT;
+    prefix_rule(can_assign);
 
     // 後置パーサの探索
     while (precedence <= get_rule(parser.current.type)->precedence) {
         advance();
         ParseFn infix_rule = get_rule(parser.previous.type)->infix;
-        infix_rule();
+        infix_rule(can_assign);
     }
 }
 
@@ -308,6 +370,82 @@ static void expression() {
     parse_precedence(PREC_ASSIGNMENT);
 }
 
+/// @brief 変数宣言を解析する
+static void var_declaration() {
+    uint8_t global = parse_variable("Expect variable name.");
+
+    if (match(TOKEN_EQUAL)) {
+        expression();
+    } else {
+        // 初期化式がなければnilで初期化したものとする
+        emit_byte(OP_NIL);
+    }
+
+    consume(TOKEN_SEMICOLON, "Expect \';\' after declaration");
+
+    define_variable(global);
+}
+
+/// @brief 式文を解析する
+static void expression_statement() {
+    expression();
+    consume(TOKEN_SEMICOLON, "Expect \';\' after expression");
+    emit_byte(OP_POP);
+}
+
+/// @brief print文を解析する
+static void print_statement() {
+    expression();
+    consume(TOKEN_SEMICOLON, "Expect \';\' after value");
+    emit_byte(OP_PRINT);
+}
+
+/// @brief 同期を開始し，文の境界に達するまでトークンを捨てる
+static void synchronize() {
+    parser.panic_mode = false;
+
+    while (parser.current.type != TOKEN_EOF) {
+        if (parser.previous.type == TOKEN_SEMICOLON) {
+            return;
+        }
+
+        switch (parser.current.type) {
+            case TOKEN_CLASS:
+            case TOKEN_FUN:
+            case TOKEN_VAR:
+            case TOKEN_FOR:
+            case TOKEN_IF:
+            case TOKEN_WHILE:
+            case TOKEN_PRINT:
+            case TOKEN_RETURN:
+                return;
+            default:
+                ;
+        }
+    }
+}
+
+/// @brief 宣言を解析する
+static void declaration() {
+    if (match(TOKEN_VAR)) {
+        var_declaration();
+    } else {
+        statement();
+    }
+
+    if (parser.panic_mode) {
+        synchronize();
+    }
+}
+
+static void statement() {
+    if (match(TOKEN_PRINT)) {
+        print_statement();
+    } else {
+        expression_statement();
+    }
+}
+
 bool compile(const char* source, Chunk* chunk) {
     init_scanner(source);
     compiling_chunk = chunk;
@@ -316,8 +454,10 @@ bool compile(const char* source, Chunk* chunk) {
     parser.panic_mode = false;
 
     advance();
-    expression();
-    consume(TOKEN_EOF, "Expect end of expression.");
+    
+    while (!match(TOKEN_EOF)) {
+        declaration();
+    }
 
     end_compiler();
 

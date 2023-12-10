@@ -15,6 +15,14 @@ typedef enum {
     OP_TRUE,
     // falseプッシュする
     OP_FALSE,
+    // スタックのトップから値をポップする
+    OP_POP,
+    // グローバル変数を取得する
+    OP_GET_GLOBAL,
+    // グローバル変数を定義する
+    OP_DEFINE_GLOBAL,
+    // グローバル変数を代入する
+    OP_SET_GLOBAL,
     // ==
     OP_EQUAL,
     // >
@@ -33,7 +41,9 @@ typedef enum {
     OP_NOT,
     // 単項-
     OP_NEGATE,
-    // 関数を抜ける命令
+    /// プリントする
+    OP_PRINT,
+    // 関数を抜ける
     OP_RETURN,
 } OpCode;
 

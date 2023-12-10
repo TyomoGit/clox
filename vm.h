@@ -22,6 +22,9 @@ typedef struct {
     Value stack[STACK_MAX];
     Value* stack_top;
 
+    // グローバルのハッシュ表
+    Table globals;
+
     /// @brief インターン化された文字列の集合
     Table strings;
 
