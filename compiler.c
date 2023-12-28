@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "common.h"
 #include "compiler.h"
@@ -49,8 +50,27 @@ typedef struct {
     Precedence precedence;
 } ParseRule;
 
+/// @brief ローカル変数
+typedef struct {
+    /// @brief 変数名
+    Token name;
+    /// @brief スコープの深さ（0はグローバルスコープ）
+    int depth;
+} Local;
+
+/// @brief コンパイラの状態
+typedef struct {
+    /// @brief スコープに入るローカル変数を管理する
+    Local locals[UINT8_COUNT];
+    /// @brief スコープ内のローカル変数の数
+    int local_count;
+    /// @brief スコープの深さ（0はグローバルスコープ）
+    int scope_depth;
+} Compiler;
+
 /// @brief 唯一のパーサ
 Parser parser;
+Compiler* current = NULL;
 /// @brief 現在のチャンク
 Chunk* compiling_chunk;
 
@@ -167,6 +187,25 @@ static void end_compiler() {
     #endif
 }
 
+/// @brief スコープに入る
+static void begin_scope() {
+    current->scope_depth += 1;
+}
+
+/// @brief スコープを抜ける
+static void end_scope() {
+    current->scope_depth -= 1;
+
+    // ローカル変数を削除する
+    while (
+        current->local_count > 0 
+        && current->locals[current->local_count - 1].depth > current->scope_depth
+    ) {
+        emit_byte(OP_POP);
+        current->local_count -= 1;
+    }
+}
+
 static void expression();
 static void statement();
 static void declaration();
@@ -181,17 +220,99 @@ static uint8_t identifier_constant(Token* name) {
     return make_constant(OBJ_VAL(copy_string(name->start, name->length)));
 }
 
+/// @brief 識別子が同じであるかどうかを確かめる
+/// @param a 
+/// @param b 
+/// @return 識別子が同じであるかどうか
+static bool identifiers_equal(Token* a, Token* b) {
+    if (a->length != b->length) {
+        return false;
+    }
+
+    return memcmp(a->start, b->start, a->length) == 0;
+}
+
+/// @brief ローカル変数を解決する
+/// @param compiler 
+/// @param name 
+/// @return ローカル変数のインデックスまたは-1（見つからなかったとき）
+static int resolve_local(Compiler* compiler, Token* name) {
+    for (int i = compiler->local_count - 1; i >= 0; i--) {
+        Local* local = &compiler->locals[i];
+        if (identifiers_equal(name, &local->name)) {
+            if (local->depth == -1) {
+                error("Can't read local variable in its own initializer.");
+            }
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+/// @brief 現在のスコープに新しい変数を追加する
+/// @param name 変数名
+static void add_local(Token name) {
+    if (current->local_count == UINT8_COUNT) {
+        error("Too many local variables in function.");
+        return;
+    }
+
+    Local* local = &current->locals[current->local_count];
+    current->local_count += 1;
+
+    local->name = name;
+    local->depth = -1;
+}
+
+/// @brief 変数を宣言する
+static void declare_variable() {
+    if (current->scope_depth == 0) {
+        return;
+    }
+
+    Token* name = &parser.previous;
+
+    for (int i = current->local_count - 1; i >= 0; i--) {
+        Local* local = &current->locals[i];
+        if (local->depth != -1 && local->depth < current->scope_depth) {
+            break;
+        }
+
+        if (identifiers_equal(name, &local->name)) {
+            error("Already a variable with this name in this scope.");
+        }
+    }
+
+    add_local(*name);
+}
+
 /// @brief 変数を解析する
 /// @param error_message 
 /// @return 定数部のインデックス
 static uint8_t parse_variable(const char* error_message) {
     consume(TOKEN_IDENTIFIER, error_message);
+
+    declare_variable();
+    // ローカル変数のときはダミーのインデックスを返す
+    if (current->scope_depth > 0) return 0;
+
     return identifier_constant(&parser.previous);
+}
+
+/// @brief 変数を初期化した印に，スコープの深さを設定する
+static void mark_initialized() {
+    current->locals[current->local_count - 1].depth = current->scope_depth;
 }
 
 /// @brief 変数を定義する命令を登録する
 /// @param global 定数表における，グローバル変数の名前のインデックス 
 static void define_variable(uint8_t global) {
+    if (current->scope_depth > 0) {
+        mark_initialized();
+        return;
+    }
+
     emit_bytes(OP_DEFINE_GLOBAL, global);
 }
 
@@ -251,6 +372,12 @@ static void emit_constant(Value value) {
     emit_bytes(OP_CONSTANT, make_constant(value));
 }
 
+static void init_compiler(Compiler* compiler) {
+    compiler->local_count = 0;
+    compiler->scope_depth = 0;
+    current = compiler;
+}
+
 /// @brief 数値リテラルを解析する
 static void number(bool can_assign) {
     double value = strtod(parser.previous.start, NULL);
@@ -261,16 +388,29 @@ static void string(bool can_assign) {
     emit_constant(OBJ_VAL(copy_string(parser.previous.start + 1, parser.previous.length - 2)));
 }
 
+/// @brief 変数名を解析する
+/// @param name 
+/// @param can_assign 
 static void named_variable(Token name, bool can_assign) {
-    uint8_t arg = identifier_constant(&name);
+    uint8_t get_op, set_op;
+    int arg = resolve_local(current, &name);
+
+    if (arg != -1) {
+        get_op = OP_GET_LOCAL;
+        set_op = OP_GET_LOCAL;
+    } else {
+        arg = identifier_constant(&name);
+        get_op = OP_GET_GLOBAL;
+        set_op = OP_SET_GLOBAL;
+    }
     
     if (can_assign && match(TOKEN_EQUAL)) {
         // set式（代入式）
         expression();
-        emit_bytes(OP_SET_GLOBAL, arg);
-        // get式
+        emit_bytes(set_op, (uint8_t)arg);
     } else {
-        emit_bytes(OP_GET_GLOBAL, arg);
+        // get式
+        emit_bytes(get_op, (uint8_t)arg);
     }
 }
 
@@ -370,6 +510,14 @@ static void expression() {
     parse_precedence(PREC_ASSIGNMENT);
 }
 
+static void block() {
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+        declaration();
+    }
+
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' after block.");
+}
+
 /// @brief 変数宣言を解析する
 static void var_declaration() {
     uint8_t global = parse_variable("Expect variable name.");
@@ -441,6 +589,10 @@ static void declaration() {
 static void statement() {
     if (match(TOKEN_PRINT)) {
         print_statement();
+    } else if (match(TOKEN_LEFT_BRACE)) {
+        begin_scope();
+        block();
+        end_scope();
     } else {
         expression_statement();
     }
@@ -448,6 +600,10 @@ static void statement() {
 
 bool compile(const char* source, Chunk* chunk) {
     init_scanner(source);
+
+    Compiler compiler;
+    init_compiler(&compiler);
+
     compiling_chunk = chunk;
 
     parser.had_error = false;

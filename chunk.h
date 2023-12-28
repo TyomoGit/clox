@@ -17,6 +17,10 @@ typedef enum {
     OP_FALSE,
     // スタックのトップから値をポップする
     OP_POP,
+    // ローカル変数を取得する
+    OP_GET_LOCAL,
+    // ローカル変数を代入する
+    OP_SET_LOCAL,
     // グローバル変数を取得する
     OP_GET_GLOBAL,
     // グローバル変数を定義する
