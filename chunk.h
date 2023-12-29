@@ -45,8 +45,14 @@ typedef enum {
     OP_NOT,
     // 単項-
     OP_NEGATE,
-    /// プリントする
+    // プリントする
     OP_PRINT,
+    // ジャンプする
+    OP_JUMP,
+    // falseならジャンプする 
+    OP_JUMP_IF_FALSE,
+    // ループ命令
+    OP_LOOP,
     // 関数を抜ける
     OP_RETURN,
 } OpCode;

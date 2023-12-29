@@ -91,6 +91,9 @@ static InterpretResult run() {
     #define READ_BYTE() (*vm.ip++)
     // 定数を読み込む
     #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+    // チャンクから2バイトを読み出して，16ビットの符号なし整数を取り出す
+    #define READ_SHORT() \
+        (vm.ip += 2, (uint16_t)((vm.ip[-2] << 8) | vm.ip[-1]))
     // 文字列を定数部から読み込む
     #define READ_STRING() AS_STRING(READ_CONSTANT())
     // do-whileなのは，ブロックを使うかつセミコロンを後ろに置けるようにするため
@@ -105,6 +108,7 @@ static InterpretResult run() {
             push(value_type(a op b)); \
         } while (false)
 
+    printf("== stack at runtime ==");
     for(;;) {
         #ifdef DEBUG_TRACE_EXECUTION
             printf("          ");
@@ -217,12 +221,28 @@ static InterpretResult run() {
                     runtime_error("Operand must be a number.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
                 push(NUMBER_VAL(-AS_NUMBER(pop())));
                 break;
             case OP_PRINT: {
                 print_value(pop());
                 printf("\n");
+                break;
+            }
+            case OP_JUMP: {
+                uint16_t offset = READ_SHORT();
+                vm.ip += offset;
+                break;
+            }
+            case OP_JUMP_IF_FALSE: {
+                uint16_t offset = READ_SHORT();
+                if (is_falsey(peek(0))) {
+                    vm.ip += offset;
+                }
+                break;
+            }
+            case OP_LOOP: {
+                uint16_t offset = READ_SHORT();
+                vm.ip -= offset;
                 break;
             }
             case OP_RETURN:
@@ -231,6 +251,7 @@ static InterpretResult run() {
     }
 
     #undef READ_BYTE
+    #undef READ_SHORTl
     #undef READ_CONSTANT
     #undef READ_STRING
     #undef BINARY_OP
