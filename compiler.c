@@ -58,8 +58,22 @@ typedef struct {
     int depth;
 } Local;
 
-/// @brief コンパイラの状態
-typedef struct {
+/// @brief 関数の種類
+typedef enum {
+    /// @brief 関数
+    TYPE_FUNCTION,
+    /// @brief トップレベル
+    TYPE_SCRIPT,
+} FunctionType;
+
+/// @brief 関数コンパイラの状態
+typedef struct Compiler {
+    /// @brief 呼ぶ出し元
+    struct Compiler* enclosing;
+    /// @brief 現在解析している関数
+    ObjFunction* function;
+    /// @brief 関数の種類
+    FunctionType type;
     /// @brief スコープに入るローカル変数を管理する
     Local locals[UINT8_COUNT];
     /// @brief スコープ内のローカル変数の数
@@ -77,7 +91,7 @@ Chunk* compiling_chunk;
 /// @brief 現在のチャンクを返す
 /// @return 現在のチャンク
 static Chunk* current_chunk() {
-    return compiling_chunk;
+    return &current->function->chunk;
 }
 
 /// @brief エラーを報告する
@@ -198,14 +212,19 @@ static void emit_return() {
 }
 
 /// @brief コンパイルを終わる
-static void end_compiler() {
+static ObjFunction* end_compiler() {
     emit_return();
+    ObjFunction* function = current->function;
 
     #ifdef DEBUG_PRINT_CODE
     if (!parser.had_error) {
-        disassemble_chunk(current_chunk(), "code");
+        disassemble_chunk(current_chunk(), function->name != NULL ? function->name->chars : "<script>");
     }
     #endif
+
+    current = current->enclosing;
+
+    return function;
 }
 
 /// @brief スコープに入る
@@ -323,6 +342,10 @@ static uint8_t parse_variable(const char* error_message) {
 
 /// @brief 変数を初期化した印に，スコープの深さを設定する
 static void mark_initialized() {
+    if (current->scope_depth == 0) {
+        return;
+    }
+
     current->locals[current->local_count - 1].depth = current->scope_depth;
 }
 
@@ -407,10 +430,27 @@ static void patch_jump(int offset) {
     current_chunk()->code[offset + 1] = jump & 0xff;
 }
 
-static void init_compiler(Compiler* compiler) {
+/// @brief コンパイラを初期化する
+/// @param compiler 
+/// @param type 
+static void init_compiler(Compiler* compiler, FunctionType type) {
+    compiler->enclosing = current;
+    compiler->function = NULL;
+    compiler->type = type;
     compiler->local_count = 0;
     compiler->scope_depth = 0;
+    compiler->function = new_function();
     current = compiler;
+    if (type != TYPE_SCRIPT) {
+        // 関数宣言なら関数名を解析する
+        current->function->name = copy_string(parser.previous.start, parser.previous.length);
+    }
+
+    Local* local = &current->locals[current->local_count];
+    current->local_count += 1;
+    local->depth = 0;
+    local->name.start = "";
+    local->name.length = 0;
 }
 
 /// @brief 数値リテラルを解析する
@@ -572,12 +612,49 @@ static void expression() {
     parse_precedence(PREC_ASSIGNMENT);
 }
 
+/// @brief ブロックを解析する
 static void block() {
     while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
         declaration();
     }
 
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after block.");
+}
+
+/// @brief 関数を解析する
+/// @param type 
+static void function(FunctionType type) {
+    Compiler compiler;
+    init_compiler(&compiler, type);
+    begin_scope();
+
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after function name.");
+
+    if (!check(TOKEN_RIGHT_PAREN)) {
+        do {
+            current->function->arity += 1;
+            if (current->function->arity > 255) {
+                error_at_current("Can't have more than 255 parameters.");
+            }
+            uint8_t constant = parse_variable("Expect parameter name.");
+            define_variable(constant);
+        } while (match(TOKEN_COMMA));
+    }
+
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after parameters.");
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before function body.");
+    block();
+
+    ObjFunction* function = end_compiler();
+    emit_bytes(OP_CONSTANT, make_constant(OBJ_VAL(function)));
+}
+
+/// @brief 関数宣言を解析する
+static void fun_declaration() {
+    uint8_t global = parse_variable("Expect function name");
+    mark_initialized();
+    function(TYPE_FUNCTION);
+    define_variable(global);
 }
 
 /// @brief 変数宣言を解析する
@@ -728,7 +805,9 @@ static void synchronize() {
 
 /// @brief 宣言を解析する
 static void declaration() {
-    if (match(TOKEN_VAR)) {
+    if (match(TOKEN_FUN)) {
+        fun_declaration();
+    } else if (match(TOKEN_VAR)) {
         var_declaration();
     } else {
         statement();
@@ -757,13 +836,11 @@ static void statement() {
     }
 }
 
-bool compile(const char* source, Chunk* chunk) {
+ObjFunction* compile(const char* source) {
     init_scanner(source);
 
     Compiler compiler;
-    init_compiler(&compiler);
-
-    compiling_chunk = chunk;
+    init_compiler(&compiler, TYPE_SCRIPT);
 
     parser.had_error = false;
     parser.panic_mode = false;
@@ -774,7 +851,6 @@ bool compile(const char* source, Chunk* chunk) {
         declaration();
     }
 
-    end_compiler();
-
-    return !parser.had_error;
+    ObjFunction* function = end_compiler();
+    return parser.had_error ? NULL : function;
 }

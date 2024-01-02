@@ -6,8 +6,7 @@
 
 /// @brief ソースコードをバイトコードに変換する
 /// @param source ソースコード
-/// @param chunk 初期化されたチャンク
-/// @return 成功したかどうか
-bool compile(const char* source, Chunk* chunk);
+/// @return エラーがなければ関数を返し，エラーならNULL
+ObjFunction* compile(const char* source);
 
 #endif

@@ -5,30 +5,41 @@
 #ifndef CLOX_VM_H
 #define CLOX_VM_H
 
+#include "object.h"
 #include "chunk.h"
 #include "table.h"
 #include "value.h"
 
-#define STACK_MAX (UINT8_MAX+1)
+#define FRAMES_MAX 64
+#define STACK_MAX (FRAMES_MAX * UINT8_COUNT)
+
+/// @brief 関数のローカル変数
+typedef struct {
+    ObjFunction* function;
+    uint8_t* ip;
+    /// @brief VMのスタックでこの関数が利用できるスロット
+    Value* slots;
+} CallFrame;
 
 /// @brief 仮想マシン
 typedef struct {
-    Chunk* chunk;
+    /// @brief コールフレーム
+    CallFrame frames[FRAMES_MAX];
+    /// @brief framesの長さ
+    int frame_count;
 
-    // 次の命令の位置
-    // instruction pointer
-    uint8_t* ip;
-
+    /// @brief スタック
     Value stack[STACK_MAX];
+    /// @brief スタックの一番上
     Value* stack_top;
 
-    // グローバルのハッシュ表
+    /// @brief グローバルのハッシュ表
     Table globals;
 
     /// @brief インターン化された文字列の集合
     Table strings;
 
-    //GC用の連結リスト
+    /// @brief GC用の連結リスト
     Obj* objects;
 
 } Vm;
