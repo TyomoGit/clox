@@ -7,13 +7,17 @@
 
 #define OBJ_TYPE(value) (AS_OBJ(value)->type)
 
-// 関数かどうか
+// 関数オブジェクトかどうか
 #define IS_FUNCTION(value) is_obj_type(value, OBJ_FUNCTION)
+// ネイティブ関数オブジェクトかどうか
+#define IS_NATIVE(value) is_obj_type(value, OBJ_NATIVE);
 // 文字列かどうか
 #define IS_STRING(value) is_obj_type(value, OBJ_STRING)
 
 // valueをObjFunction*とする
 #define AS_FUNCTION(value) ((ObjFunction*)AS_OBJ(value))
+// valueをNativeFnとする
+#define AS_NATIVE(value) (((ObjNative*)AS_OBJ(value))->function)
 // valueをObjString*とする
 #define AS_STRING(value) ((ObjString*)AS_OBJ(value))
 // valueをchar*にする
@@ -21,8 +25,10 @@
 
 /// @brief Loxオブジェクトの種類
 typedef enum {
-    /// @brief 関数
+    /// @brief 関数オブジェクト
     OBJ_FUNCTION,
+    /// @brief ネイティブ関数オブジェクト
+    OBJ_NATIVE,
     /// @brief 文字列
     OBJ_STRING,
 } ObjType;
@@ -45,6 +51,14 @@ typedef struct {
     ObjString* name;
 } ObjFunction;
 
+/// @brief ネイティブ関数
+typedef Value (*NativeFn)(int arg_count, Value* args);
+
+typedef struct {
+    Obj obj;
+    NativeFn function;
+} ObjNative;
+
 // 先頭の数バイトはobjと一致する（ポインタのキャスト可能）
 struct ObjString {
     Obj obj;
@@ -54,9 +68,15 @@ struct ObjString {
     uint32_t hash;
 };
 
-/// @brief 新しい関数を作る
+/// @brief 新しい関数オブジェクトを作る
 /// @return 新しい関数
 ObjFunction* new_function();
+
+/// @brief 新しいネイティブ関数オブジェクトを作る
+/// @param function 新しいネイティブ関数
+/// @return 新しいネイティブ関数オブジェクト
+ObjNative* new_native(NativeFn function);
+
 /// @brief 文字列を所有する
 /// @param chars 
 /// @param length 

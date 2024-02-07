@@ -32,6 +32,12 @@ ObjFunction* new_function() {
     return function;
 }
 
+ObjNative* new_native(NativeFn function) {
+    ObjNative* native = ALLOCATE_OBJ(ObjNative, OBJ_NATIVE);
+    native->function = function;
+    return native;
+}
+
 /// @brief 文字列オブジェクトを作る
 /// @param chars 
 /// @param length 
@@ -100,11 +106,14 @@ static void print_function(ObjFunction* function) {
 
 void print_object(Value value) {
     switch (OBJ_TYPE(value)) {
-        case OBJ_STRING:
-            printf("%s", AS_CSTRING(value));
-            break;
         case OBJ_FUNCTION:
             print_function(AS_FUNCTION(value));
+            break;
+        case OBJ_NATIVE:
+            printf("<native fn>");
+            break;
+        case OBJ_STRING:
+            printf("%s", AS_CSTRING(value));
             break;
     }
 }

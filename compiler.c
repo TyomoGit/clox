@@ -37,7 +37,7 @@ typedef enum {
     PREC_PRIMARY
 } Precedence;
 
-/// @brief 
+/// @brief 解析関数
 typedef void (*ParseFn)(bool can_assign);
 
 /// @brief 解析ルール
@@ -208,6 +208,7 @@ static int emit_jump(uint8_t instruction) {
 
 /// @brief OP_RETURNをチャンクに加える
 static void emit_return() {
+    emit_byte(OP_NIL);
     emit_byte(OP_RETURN);
 }
 
@@ -360,6 +361,23 @@ static void define_variable(uint8_t global) {
     emit_bytes(OP_DEFINE_GLOBAL, global);
 }
 
+static uint8_t argument_list() {
+    uint8_t arg_count = 0;
+
+    if (!check(TOKEN_RIGHT_PAREN)) {
+        do {
+            expression();
+            if (arg_count >= 255) {
+                error("Can't have more than 255 arguments.");
+            }
+            arg_count += 1;
+        } while (match(TOKEN_COMMA));
+    }
+
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after arguments.");
+    return arg_count;
+}
+
 /// @brief 中置式を解析する
 static void binary(bool can_assign) {
     TokenType operator_type = parser.previous.type;
@@ -379,6 +397,13 @@ static void binary(bool can_assign) {
         default:
             return; // Unreachable
     }
+}
+
+/// @brief 関数呼び出しを解析する
+/// @param canAssign 
+static void call(bool canAssign) {
+    uint8_t arg_count = argument_list();
+    emit_bytes(OP_CALL, arg_count);
 }
 
 /// @brief リテラルを解析する
@@ -535,7 +560,7 @@ static void unary(bool can_assign) {
 }
 
 ParseRule rules[] = {
-    [TOKEN_LEFT_PAREN]    = {grouping, NULL,   PREC_NONE},
+    [TOKEN_LEFT_PAREN]    = {grouping, call,   PREC_CALL},
     [TOKEN_RIGHT_PAREN]   = {NULL,     NULL,   PREC_NONE},
     [TOKEN_LEFT_BRACE]    = {NULL,     NULL,   PREC_NONE}, 
     [TOKEN_RIGHT_BRACE]   = {NULL,     NULL,   PREC_NONE},
@@ -762,6 +787,20 @@ static void print_statement() {
     emit_byte(OP_PRINT);
 }
 
+static void return_statement() {
+    if (current->type == TYPE_SCRIPT) {
+        error("Can't return from top-level code.");
+    }
+
+    if (match(TOKEN_SEMICOLON)) {
+        emit_return();
+    } else {
+        expression();
+        consume(TOKEN_SEMICOLON, "Expect ';' after return value.");
+        emit_byte(OP_RETURN);
+    }
+}
+
 /// @brief while文を解析する
 static void while_statement() {
     int loop_start = current_chunk()->count;
@@ -825,6 +864,8 @@ static void statement() {
         for_statement();
     } else if (match(TOKEN_IF)) {
         if_statement();
+    } else if (match(TOKEN_RETURN)) {
+        return_statement();
     } else if (match(TOKEN_WHILE)) {
         while_statement();
     } else if (match(TOKEN_LEFT_BRACE)) {

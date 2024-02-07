@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <time.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -10,6 +11,10 @@
 #include "compiler.h"
 
 Vm vm;
+
+static Value clock_native(int arg_count, Value* args) {
+    return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+}
 
 /// @brief vm.stackをリセットする
 static void reset_stack() {
@@ -27,11 +32,32 @@ static void runtime_error(const char* format, ...) {
     va_end(args);
     fputs("\n", stderr);
 
-    CallFrame* frame = &vm.frames[vm.frame_count - 1];
-    size_t instruction = frame->ip - frame->function->chunk.code - 1;
-    int line = frame->function->chunk.lines[instruction];
-    fprintf(stderr, "[line: %d] in script\n", line);
+    for (int i = vm.frame_count - 1; i >= 0; i--) {
+        CallFrame* frame = &vm.frames[i];
+        ObjFunction* function = frame->function;
+        size_t instruction = frame->ip - function->chunk.code - 1;
+        fprintf(stderr, "[line %d] in ", function->chunk.lines[instruction]);
+
+        if (function->name == NULL) {
+            fprintf(stderr, "script\n");
+        } else {
+            fprintf(stderr, "%s()\n", function->name->chars);
+        }
+    }
+
     reset_stack();
+}
+
+/// @brief ネイティブ関数を定義する
+/// @param name 定義する名前
+/// @param function ネイティブ関数
+static void define_native(const char* name, NativeFn function) {
+    // GCに消されないように一旦pushしてpopする
+    push(OBJ_VAL(copy_string(name, (int)strlen(name))));
+    push(OBJ_VAL(new_native(function)));
+    table_set(&vm.globals, AS_STRING(vm.stack[0]), vm.stack[1]);
+    pop();
+    pop();
 }
 
 void init_vm() {
@@ -40,6 +66,9 @@ void init_vm() {
 
     init_table(&vm.globals);
     init_table(&vm.strings);
+
+    // ネイティブ関数の定義
+    define_native("clock", clock_native);
 }
 
 void free_vm() {
@@ -63,6 +92,54 @@ Value pop() {
 /// @return スタックの値
 static Value peek(int distance) {
     return vm.stack_top[-1 - distance];
+}
+
+/// @brief 関数を呼び出す
+/// @param function 呼び出される関数
+/// @param arg_count 引数の個数
+/// @return エラーがなければtrue
+static bool call(ObjFunction* function, int arg_count) {
+    if (arg_count != function->arity) {
+        runtime_error("Expected %d arguments but got %d.", function->arity, arg_count);
+        return false;
+    }
+
+    if (vm.frame_count == FRAMES_MAX) {
+        runtime_error("Stack overflow.");
+        return false;
+    }
+
+    CallFrame* frame = &vm.frames[vm.frame_count];
+    vm.frame_count += 1;
+
+    frame->function = function;
+    frame->ip = function->chunk.code;
+    frame->slots = vm.stack_top - arg_count - 1;
+    return true;
+}
+
+/// @brief コールを実行する
+/// @param callee 実行対象
+/// @param arg_count 引数の個数
+/// @return エラーがなければtrue
+static bool call_value(Value callee, int arg_count) {
+    if (IS_OBJ(callee)) {
+        switch (OBJ_TYPE(callee)) {
+            case OBJ_FUNCTION:
+                return call(AS_FUNCTION(callee), arg_count);
+            case OBJ_NATIVE: {
+                NativeFn native = AS_NATIVE(callee);
+                Value result = native(arg_count, vm.stack_top - arg_count);
+                vm.stack_top -= arg_count + 1;
+                push(result);
+                return true;
+            }
+            default:
+                break;
+        }
+    }
+    runtime_error("Can only call functions and classes.");
+    return false;
 }
 
 /// @brief 値が偽性かどうかを判定する
@@ -255,8 +332,27 @@ static InterpretResult run() {
                 frame->ip -= offset;
                 break;
             }
-            case OP_RETURN:
-                return INTERPRET_OK;
+            case OP_CALL: {
+                int arg_count = READ_BYTE();
+                if (!call_value(peek(arg_count), arg_count)) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                frame = &vm.frames[vm.frame_count - 1];
+                break;
+            }
+            case OP_RETURN: {
+                Value result = pop();
+                vm.frame_count -= 1;
+                if (vm.frame_count <= 0) {
+                    pop();
+                    return INTERPRET_OK;
+                }
+
+                vm.stack_top = frame->slots;
+                push(result);
+                frame = &vm.frames[vm.frame_count - 1];
+                break;
+            }
         }
     }
 
@@ -276,10 +372,7 @@ InterpretResult interpret(const char* source) {
     }
 
     push(OBJ_VAL(function));
-    CallFrame* frame = &vm.frames[vm.frame_count++];
-    frame->function = function;
-    frame->ip = function->chunk.code;
-    frame->slots = vm.stack;
+   call(function, 0);
 
     return run();
 }

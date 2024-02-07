@@ -53,6 +53,8 @@ typedef enum {
     OP_JUMP_IF_FALSE,
     // ループ命令
     OP_LOOP,
+    // コール
+    OP_CALL,
     // 関数を抜ける
     OP_RETURN,
 } OpCode;
