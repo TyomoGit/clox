@@ -20,6 +20,7 @@ static Value clock_native(int arg_count, Value* args) {
 static void reset_stack() {
     vm.stack_top = vm.stack;
     vm.frame_count = 0;
+    vm.open_upvalues = NULL;
 }
 
 /// @brief ランタイムエラーを発出する
@@ -34,7 +35,7 @@ static void runtime_error(const char* format, ...) {
 
     for (int i = vm.frame_count - 1; i >= 0; i--) {
         CallFrame* frame = &vm.frames[i];
-        ObjFunction* function = frame->function;
+        ObjFunction* function = frame->closure->function;
         size_t instruction = frame->ip - function->chunk.code - 1;
         fprintf(stderr, "[line %d] in ", function->chunk.lines[instruction]);
 
@@ -98,9 +99,9 @@ static Value peek(int distance) {
 /// @param function 呼び出される関数
 /// @param arg_count 引数の個数
 /// @return エラーがなければtrue
-static bool call(ObjFunction* function, int arg_count) {
-    if (arg_count != function->arity) {
-        runtime_error("Expected %d arguments but got %d.", function->arity, arg_count);
+static bool call(ObjClosure* closure, int arg_count) {
+    if (arg_count != closure->function->arity) {
+        runtime_error("Expected %d arguments but got %d.", closure->function->arity, arg_count);
         return false;
     }
 
@@ -112,8 +113,8 @@ static bool call(ObjFunction* function, int arg_count) {
     CallFrame* frame = &vm.frames[vm.frame_count];
     vm.frame_count += 1;
 
-    frame->function = function;
-    frame->ip = function->chunk.code;
+    frame->closure = closure;
+    frame->ip = closure->function->chunk.code;
     frame->slots = vm.stack_top - arg_count - 1;
     return true;
 }
@@ -125,8 +126,8 @@ static bool call(ObjFunction* function, int arg_count) {
 static bool call_value(Value callee, int arg_count) {
     if (IS_OBJ(callee)) {
         switch (OBJ_TYPE(callee)) {
-            case OBJ_FUNCTION:
-                return call(AS_FUNCTION(callee), arg_count);
+            case OBJ_CLOSURE:
+                return call(AS_CLOSURE(callee), arg_count);
             case OBJ_NATIVE: {
                 NativeFn native = AS_NATIVE(callee);
                 Value result = native(arg_count, vm.stack_top - arg_count);
@@ -140,6 +141,53 @@ static bool call_value(Value callee, int arg_count) {
     }
     runtime_error("Can only call functions and classes.");
     return false;
+}
+
+/// @brief ローカル変数をキャプチャする
+/// @param local キャプチャされるローカル変数
+/// @return 上位値オブジェクト
+static ObjUpvalue* capture_upvalue(Value* local) {
+    ObjUpvalue* prev_upvalue = NULL;
+    ObjUpvalue* upvalue = vm.open_upvalues;
+
+    // スロットが等しい -> 既にこの変数をキャプチャしている上位値があるので，これを使う（ある）
+    // リストを最後まで見終わった -> 見つけられなかった（ない）
+    // 下のローカルスロットを持つ上位値を見つけた -> 探している上位値の位置を既に通過した（ない）
+    while (upvalue != NULL && upvalue->location > local) {
+        prev_upvalue = upvalue;
+        upvalue = upvalue->next;
+    }
+
+    if (upvalue != NULL && upvalue->location == local) {
+        return upvalue;
+    }
+
+    ObjUpvalue* created_upvalue = new_upvalue(local);
+    created_upvalue->next = upvalue;
+
+    if (prev_upvalue == NULL) {
+        // リストが空のときは，先頭に挿入する
+        vm.open_upvalues = created_upvalue;
+    } else {
+        // upvalueよりも前の位置に挿入
+        prev_upvalue->next = created_upvalue;
+    }
+
+    return created_upvalue;
+}
+
+/// @brief 上位値をクローズしてヒープに移す
+/// @param last ここで指定されるスロットか，ここより上にある上位値を探して，クローズする
+static void close_upvalues(Value* last) {
+    while (
+        vm.open_upvalues != NULL
+        && vm.open_upvalues->location >= last
+    ) {
+        ObjUpvalue* upvalue = vm.open_upvalues;
+        upvalue->closed = *upvalue->location;
+        upvalue->location = &upvalue->closed;
+        vm.open_upvalues = upvalue->next;
+    }
 }
 
 /// @brief 値が偽性かどうかを判定する
@@ -173,7 +221,7 @@ static InterpretResult run() {
     #define READ_BYTE() (*frame->ip++)
     // 定数を読み込む
     #define READ_CONSTANT() \
-        (frame->function->chunk.constants.values[READ_BYTE()])
+        (frame->closure->function->chunk.constants.values[READ_BYTE()])
     // チャンクから2バイトを読み出して，16ビットの符号なし整数を取り出す
     #define READ_SHORT() \
         (frame->ip += 2, \
@@ -204,8 +252,8 @@ static InterpretResult run() {
             printf("\n");
 
             disassemble_instruction(
-                &frame->function->chunk,
-                (int)(frame->ip - frame->function->chunk.code)
+                &frame->closure->function->chunk,
+                (int)(frame->ip - frame->closure->function->chunk.code)
             );
         #endif
 
@@ -262,6 +310,16 @@ static InterpretResult run() {
                     runtime_error("Undefined variable \'%s\'.", name->chars);
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                break;
+            }
+            case OP_GET_UPVALUE: {
+                uint8_t slot = READ_BYTE();
+                push(*frame->closure->upvalues[slot]->location);
+                break;
+            }
+            case OP_SET_UPVALUE: {
+                uint8_t slot = READ_BYTE();
+                *frame->closure->upvalues[slot]->location = peek(0);
                 break;
             }
             case OP_EQUAL: {
@@ -340,8 +398,31 @@ static InterpretResult run() {
                 frame = &vm.frames[vm.frame_count - 1];
                 break;
             }
+            case OP_CLOSURE: {
+                ObjFunction* function = AS_FUNCTION(READ_CONSTANT());
+                ObjClosure* closure = new_closure(function);
+                push(OBJ_VAL(closure));
+
+                for (int i = 0; i < closure->upvalue_count; i++) {
+                    uint8_t is_local = READ_BYTE();
+                    uint8_t index = READ_BYTE();
+                    if (is_local) {
+                        closure->upvalues[i] = capture_upvalue(frame->slots + index);
+                    } else {
+                        // 外側の関数から上位値を取り出す
+                        closure->upvalues[i] = frame->closure->upvalues[index];
+                    }
+                }
+                
+                break;
+            }
+            case OP_CLOSE_UPVALUE:
+                close_upvalues(vm.stack_top - 1);
+                pop();
+                break;
             case OP_RETURN: {
                 Value result = pop();
+                close_upvalues(frame->slots);
                 vm.frame_count -= 1;
                 if (vm.frame_count <= 0) {
                     pop();
@@ -371,8 +452,12 @@ InterpretResult interpret(const char* source) {
         return INTERPRET_COMPILE_ERROR;
     }
 
+    // GCに消されないように一旦プッシュ
     push(OBJ_VAL(function));
-   call(function, 0);
+    ObjClosure* closure = new_closure(function);
+    pop();
+    push(OBJ_VAL(closure));
+    call(closure, 0);
 
     return run();
 }

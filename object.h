@@ -7,13 +7,16 @@
 
 #define OBJ_TYPE(value) (AS_OBJ(value)->type)
 
+// クロージャオブジェクトがどうか
+#define IS_CLOSURE(value) is_obj_type(value, OBJ_CLOSURE)
 // 関数オブジェクトかどうか
 #define IS_FUNCTION(value) is_obj_type(value, OBJ_FUNCTION)
 // ネイティブ関数オブジェクトかどうか
-#define IS_NATIVE(value) is_obj_type(value, OBJ_NATIVE);
+#define IS_NATIVE(value) is_obj_type(value, OBJ_NATIVE)
 // 文字列かどうか
 #define IS_STRING(value) is_obj_type(value, OBJ_STRING)
 
+#define AS_CLOSURE(value) ((ObjClosure*)AS_OBJ(value))
 // valueをObjFunction*とする
 #define AS_FUNCTION(value) ((ObjFunction*)AS_OBJ(value))
 // valueをNativeFnとする
@@ -25,12 +28,16 @@
 
 /// @brief Loxオブジェクトの種類
 typedef enum {
+    /// @brief クロージャオブジェクト
+    OBJ_CLOSURE,
     /// @brief 関数オブジェクト
     OBJ_FUNCTION,
     /// @brief ネイティブ関数オブジェクト
     OBJ_NATIVE,
     /// @brief 文字列
     OBJ_STRING,
+    /// @brief 上位値オブジェクト
+    OBJ_UPVALUE,
 } ObjType;
 
 struct Obj {
@@ -45,6 +52,8 @@ typedef struct {
     Obj obj;
     /// @brief パラメータの数
     int arity;
+    /// @brief 上位値の個数
+    int upvalue_count;
     /// @brief コード
     Chunk chunk;
     /// @brief 関数名
@@ -64,9 +73,36 @@ struct ObjString {
     Obj obj;
     int length;
     char* chars;
-    // 文字列のハッシュ
+    /// @brief 文字列のハッシュ
     uint32_t hash;
 };
+
+/// @brief 上位値オブジェクト
+typedef struct ObjUpvalue {
+    Obj obj;
+    /// @brief キャプチャした変数へのポインタ（クローズしたらclosedを指すようになる）
+    Value* location;
+    /// @brief 上位値がクローズしたらここに移される
+    Value closed;
+    /// @brief 次の上位値オブジェクト（連結リスト）
+    struct ObjUpvalue* next;
+} ObjUpvalue;
+
+/// @brief クロージャオブジェクト
+typedef struct {
+    Obj obj;
+    /// @brief ラップする関数オブジェクト
+    ObjFunction* function;
+    /// @brief 上位値のポインタの配列
+    ObjUpvalue** upvalues;
+    /// @brief 上位値のポインタの配列の長さ
+    int upvalue_count;
+} ObjClosure;
+
+/// @brief 関数オブジェクトから新しいクロージャオブジェクトを作る
+/// @param function 関数オブジェクト
+/// @return 新しいクロージャオブジェクト
+ObjClosure* new_closure(ObjFunction* function);
 
 /// @brief 新しい関数オブジェクトを作る
 /// @return 新しい関数
@@ -88,6 +124,11 @@ ObjString* take_string(char* chars, int length);
 /// @param length 
 /// @return 
 ObjString* copy_string(const char* chars, int length);
+
+/// @brief 新しい上位値オブジェクトを作る
+/// @param slot キャプチャした変数があるスロット
+/// @return 新しい上位値オブジェクト
+ObjUpvalue* new_upvalue(Value* slot);
 
 /// @brief ヒープに割り当てたオブジェクトをプリントする
 /// @param value 

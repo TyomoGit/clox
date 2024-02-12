@@ -50,13 +50,23 @@ typedef struct {
     Precedence precedence;
 } ParseRule;
 
-/// @brief ローカル変数
+/// @brief ローカル変数．スタック上に保持．
 typedef struct {
     /// @brief 変数名
     Token name;
     /// @brief スコープの深さ（0はグローバルスコープ）
     int depth;
+    /// @brief キャプチャされているかどうか(スコープから抜けるときにヒープに移すかどうか判定用)
+    bool is_captured;
 } Local;
+
+/// @brief 上位値．ヒープ上に保持．
+typedef struct {
+    /// @brief 上位値インデックス
+    uint8_t index;
+    /// @brief ローカル変数かどうか
+    bool is_local;
+} Upvalue;
 
 /// @brief 関数の種類
 typedef enum {
@@ -68,7 +78,7 @@ typedef enum {
 
 /// @brief 関数コンパイラの状態
 typedef struct Compiler {
-    /// @brief 呼ぶ出し元
+    /// @brief 呼び出し元
     struct Compiler* enclosing;
     /// @brief 現在解析している関数
     ObjFunction* function;
@@ -78,6 +88,8 @@ typedef struct Compiler {
     Local locals[UINT8_COUNT];
     /// @brief スコープ内のローカル変数の数
     int local_count;
+    /// @brief 上位値の配列
+    Upvalue upvalues[UINT8_COUNT];
     /// @brief スコープの深さ（0はグローバルスコープ）
     int scope_depth;
 } Compiler;
@@ -242,7 +254,11 @@ static void end_scope() {
         current->local_count > 0 
         && current->locals[current->local_count - 1].depth > current->scope_depth
     ) {
-        emit_byte(OP_POP);
+        if (current->locals[current->local_count - 1].is_captured) {
+            emit_byte(OP_CLOSE_UPVALUE);
+        } else {
+            emit_byte(OP_POP);
+        }
         current->local_count -= 1;
     }
 }
@@ -291,6 +307,58 @@ static int resolve_local(Compiler* compiler, Token* name) {
     return -1;
 }
 
+/// @brief 上位値を追加する
+/// @param compiler 関数のコンパイラ
+/// @param index 上位値インデックス
+/// @param is_local ローカル変数かどうか（ローカル変数ならtrue，他の関数からの上位値ならfalse）
+/// @return 上位値インデックス
+static int add_upvalue(Compiler* compiler, uint8_t index, bool is_local) {
+    int upvalue_count = compiler->function->upvalue_count;
+
+    // すでに同じインデックスのものあれば，そのインデックスを返す
+    for (int i = 0; i < upvalue_count; i++) {
+        Upvalue* upvalue = &compiler->upvalues[i];
+        if (upvalue->index == index && upvalue->is_local == is_local) {
+            return i;
+        }
+    }
+
+    if (upvalue_count >= UINT8_COUNT) {
+        error("Too many closure variable in function.");
+        return 0;
+    }
+
+    compiler->upvalues[upvalue_count].is_local = is_local;
+    compiler->upvalues[upvalue_count].index = index;
+    return compiler->function->upvalue_count++;
+}
+
+/// @brief 上位値を解決する
+/// @param compiler 現在のコンパイラ
+/// @param name 識別子
+/// @return 上位値インデックス
+static int resolve_upvalue(Compiler* compiler, Token* name) {
+    if (compiler->enclosing == NULL) {
+        // 最も外側の関数に到達した
+        return -1;
+    }
+
+    // すぐ外側の関数に探しているローカル変数があれば，上位値を追加する
+    int local = resolve_local(compiler->enclosing, name);
+    if (local != -1) {
+        compiler->enclosing->locals[local].is_captured = true;
+        return add_upvalue(compiler, (uint8_t)local, true);
+    }
+
+    // すぐ外側の関数の上位値を調べて，あればコンパイラに追加する
+    int upvalue = resolve_upvalue(compiler->enclosing, name);
+    if (upvalue != -1) {
+        return add_upvalue(compiler, (uint8_t)upvalue, false);
+    }
+
+    return -1;
+}
+
 /// @brief 現在のスコープに新しい変数を追加する
 /// @param name 変数名
 static void add_local(Token name) {
@@ -304,6 +372,7 @@ static void add_local(Token name) {
 
     local->name = name;
     local->depth = -1;
+    local->is_captured = false;
 }
 
 /// @brief 変数を宣言する
@@ -474,6 +543,7 @@ static void init_compiler(Compiler* compiler, FunctionType type) {
     Local* local = &current->locals[current->local_count];
     current->local_count += 1;
     local->depth = 0;
+    local->is_captured = false;
     local->name.start = "";
     local->name.length = 0;
 }
@@ -525,6 +595,9 @@ static void named_variable(Token name, bool can_assign) {
     if (arg != -1) {
         get_op = OP_GET_LOCAL;
         set_op = OP_SET_LOCAL;
+    } else if ((arg = resolve_upvalue(current, &name)) != -1) {
+        get_op = OP_GET_UPVALUE;
+        set_op = OP_SET_UPVALUE;
     } else {
         arg = identifier_constant(&name);
         get_op = OP_GET_GLOBAL;
@@ -671,7 +744,16 @@ static void function(FunctionType type) {
     block();
 
     ObjFunction* function = end_compiler();
-    emit_bytes(OP_CONSTANT, make_constant(OBJ_VAL(function)));
+    emit_bytes(OP_CLOSURE, make_constant(OBJ_VAL(function)));
+
+    // 各上位値は2byteのオペランドを持つ
+    for (int i = 0; i < function->upvalue_count; i++) {
+        // オペランド1: 1ならすぐ外側の関数にあるローカル変数をキャプチャする
+        // 0なら上位値をキャプチャする
+        emit_byte(compiler.upvalues[i].is_local ? 1 : 0);
+        // オペランド2: 上位値のインデックス
+        emit_byte(compiler.upvalues[i].index);
+    }
 }
 
 /// @brief 関数宣言を解析する

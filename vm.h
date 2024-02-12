@@ -15,7 +15,7 @@
 
 /// @brief 関数のローカル変数
 typedef struct {
-    ObjFunction* function;
+    ObjClosure* closure;
     uint8_t* ip;
     /// @brief VMのスタックでこの関数が利用できるスロット
     Value* slots;
@@ -38,6 +38,9 @@ typedef struct {
 
     /// @brief インターン化された文字列の集合
     Table strings;
+
+    /// @brief オープンな上位値の配列
+    ObjUpvalue* open_upvalues;
 
     /// @brief GC用の連結リスト
     Obj* objects;

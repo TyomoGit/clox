@@ -21,11 +21,15 @@ typedef enum {
     OP_GET_LOCAL,
     // ローカル変数を代入する
     OP_SET_LOCAL,
+    // 上位値を取得する
+    OP_GET_UPVALUE,
+    // 上位値に代入する
+    OP_SET_UPVALUE,
     // グローバル変数を取得する
     OP_GET_GLOBAL,
     // グローバル変数を定義する
     OP_DEFINE_GLOBAL,
-    // グローバル変数を代入する
+    // グローバル変数に代入する
     OP_SET_GLOBAL,
     // ==
     OP_EQUAL,
@@ -55,6 +59,10 @@ typedef enum {
     OP_LOOP,
     // コール
     OP_CALL,
+    // クロージャを作成する
+    OP_CLOSURE,
+    // スタックのトップにある上位値を閉じ，ヒープに移す
+    OP_CLOSE_UPVALUE,
     // 関数を抜ける
     OP_RETURN,
 } OpCode;

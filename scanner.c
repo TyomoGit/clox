@@ -107,10 +107,12 @@ static void skip_whitespace() {
                 advance();
                 break;
             case '/':
+            printf("command");
                 if (peek_next() == '/') {
                     while (peek() != '\n' && !isAtEnd()) {
                         advance();
                     }
+                    break;
                 } else {
                     return;
                 }
