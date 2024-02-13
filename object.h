@@ -41,8 +41,11 @@ typedef enum {
 } ObjType;
 
 struct Obj {
+    /// @brief オブジェクトの種類
     ObjType type;
-    // GC用の，オブジェクトの連結リスト
+    /// @brief GCにマークがつけられているか
+    bool is_marked;
+    /// @brief GC用のオブジェクトの連結リスト
     struct Obj* next;
 };
 

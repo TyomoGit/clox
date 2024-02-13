@@ -34,6 +34,17 @@
 // 0以外    , > old_size , 既存の割り当てを拡大する
 void* reallocate(void* pointer, size_t old_size, size_t new_size);
 
+/// @brief オブジェクトにマークをつける
+/// @param object マークをつけられるオブジェクト
+void mark_object(Obj* object);
+
+/// @brief 値にマークをつける
+/// @param value マークをつけられる値
+void mark_value(Value value);
+
+/// @brief ごみを集める
+void collect_garbage();
+
 /// @brief 全てのオブジェクトを解放する
 void free_objects();
 

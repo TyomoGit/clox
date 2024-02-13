@@ -9,4 +9,7 @@
 /// @return エラーがなければ関数を返し，エラーならNULL
 ObjFunction* compile(const char* source);
 
+/// @brief コンパイラ使うオブジェクトをマークする
+void mark_compiler_roots();
+
 #endif

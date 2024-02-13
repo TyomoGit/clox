@@ -54,11 +54,19 @@ bool table_delete(Table* table, ObjString* key);
 void table_add_all(Table* from, Table* to);
 
 /// @brief ハッシュ表にある文字列を探索する
-/// @param table 
-/// @param chars 
-/// @param length 
-/// @param hash 
+/// @param table 文字列を追加するテーブル
+/// @param chars 追加されるC文字列
+/// @param length 文字列の長さ
+/// @param hash 文字列のハッシュ
 /// @return 
 ObjString* table_find_string(Table* table, const char* chars, int length, uint32_t hash);
+
+/// @brief 文字列表から白色（到達不可能）のものを削除する
+/// @param table 対象のテーブル
+void table_remove_white(Table* table);
+
+/// @brief 表にある全てのオブジェクトにマークをつける
+/// @param table マークする表
+void mark_table(Table* table);
 
 #endif

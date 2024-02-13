@@ -42,8 +42,23 @@ typedef struct {
     /// @brief オープンな上位値の配列
     ObjUpvalue* open_upvalues;
 
+    /// @brief 確保されたメモリの大きさ
+    size_t bytes_allocated;
+
+    /// @brief 次のガベージコレクションを実行する，bytes_allocatedの閾値
+    size_t next_gc;
+
     /// @brief GC用の連結リスト
     Obj* objects;
+
+    /// @brief グレイのオブジェクトの数
+    int gray_count;
+
+    /// @brief gray_stackの容量
+    int gray_capacity;
+
+    /// @brief グレイのオブジェクトを記録するスタック
+    Obj** gray_stack;
 
 } Vm;
 
