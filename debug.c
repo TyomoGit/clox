@@ -62,6 +62,19 @@ static int constant_instruction(const char* name, Chunk* chunk, int offset) {
     return offset + 2;
 }
 
+/// @brief INVOKE命令を逆アセンブルする
+/// @param name 
+/// @param chunk 
+/// @param offset 
+/// @return 
+static int invoke_instruction(const char* name, Chunk* chunk, int offset) {
+    uint8_t constant = chunk->code[offset + 1];
+    uint8_t arg_count = chunk->code[offset + 2];
+    printf("%-16s (%d args) %4d '", name, arg_count, constant);
+    print_value(chunk->constants.values[constant]);
+    printf("'\n");
+    return offset + 3;
+}
 
 /// @brief 命令を逆アセンブルする
 /// @param chunk チャンク
@@ -94,6 +107,10 @@ int disassemble_instruction(Chunk* chunk, int offset) {
         return byte_instruction("OP_GET_UPVALUE", chunk, offset);
     case OP_SET_UPVALUE:
         return byte_instruction("OP_SET_UPVALUE", chunk, offset);
+    case OP_GET_PROPERTY:
+        return constant_instruction("OP_GET_PROPERTY", chunk, offset);
+    case OP_SET_PROPERTY:
+        return constant_instruction("OP_SET_PROPERTY", chunk, offset);
     case OP_SET_LOCAL:
         return byte_instruction("OP_SET_LOCAL", chunk, offset);
     case OP_GET_GLOBAL:
@@ -130,6 +147,8 @@ int disassemble_instruction(Chunk* chunk, int offset) {
         return jump_instruction("OP_LOOP", -1, chunk, offset);
     case OP_CALL:
         return byte_instruction("OP_CALL", chunk, offset);
+    case OP_INVOKE:
+        return invoke_instruction("OP_INVOKE", chunk, offset);
     case OP_CLOSURE: {
         offset += 1;
         uint8_t constant = chunk->code[offset];
@@ -161,7 +180,10 @@ int disassemble_instruction(Chunk* chunk, int offset) {
         return simple_instruction("OP_CLOSE_UPVALUE", offset);
     case OP_RETURN:
         return simple_instruction("OP_RETURN", offset);
-    
+    case OP_CLASS:
+        return constant_instruction("OP_CLASS", chunk, offset);
+    case OP_METHOD:
+        return constant_instruction("OP_METHOD", chunk, offset);
     default:
         printf("unknown opcode %d\n", instruction);
         return offset + 1;

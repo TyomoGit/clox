@@ -39,6 +39,8 @@ typedef struct {
     /// @brief インターン化された文字列の集合
     Table strings;
 
+    ObjString* init_string;
+
     /// @brief オープンな上位値の配列
     ObjUpvalue* open_upvalues;
 

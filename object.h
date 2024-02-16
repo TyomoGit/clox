@@ -3,22 +3,37 @@
 
 #include "common.h"
 #include "chunk.h"
+#include "table.h"
 #include "value.h"
 
+// オブジェクトの種類を得る
 #define OBJ_TYPE(value) (AS_OBJ(value)->type)
 
+// 束縛メソッドオブジェクトかどうか
+#define IS_BOUND_METHOD(value) is_obj_type(value, OBJ_BOUND_METHOD);
+// クラスオブジェクトかどうか
+#define IS_CLASS(value) is_obj_type(value, OBJ_CLASS)
 // クロージャオブジェクトがどうか
 #define IS_CLOSURE(value) is_obj_type(value, OBJ_CLOSURE)
 // 関数オブジェクトかどうか
 #define IS_FUNCTION(value) is_obj_type(value, OBJ_FUNCTION)
+// インスタンスオブジェクトかどうか
+#define IS_INSTANCE(value) is_obj_type(value, OBJ_INSTANCE)
 // ネイティブ関数オブジェクトかどうか
 #define IS_NATIVE(value) is_obj_type(value, OBJ_NATIVE)
 // 文字列かどうか
 #define IS_STRING(value) is_obj_type(value, OBJ_STRING)
 
+// valueをObjBoundMethod*とする
+#define AS_BOUND_METHOD(value) ((ObjBoundMethod*)AS_OBJ(value))
+// valueをObjClass*とする
+#define AS_CLASS(value) ((ObjClass*)AS_OBJ(value))
+// valueをObjClosure*とする
 #define AS_CLOSURE(value) ((ObjClosure*)AS_OBJ(value))
 // valueをObjFunction*とする
 #define AS_FUNCTION(value) ((ObjFunction*)AS_OBJ(value))
+// valueをObjInstance*とする
+#define AS_INSTANCE(value) ((ObjInstance*)AS_OBJ(value))
 // valueをNativeFnとする
 #define AS_NATIVE(value) (((ObjNative*)AS_OBJ(value))->function)
 // valueをObjString*とする
@@ -28,10 +43,16 @@
 
 /// @brief Loxオブジェクトの種類
 typedef enum {
+    /// @brief 束縛メソッドオブジェクト
+    OBJ_BOUND_METHOD,
+    /// @brief クラスオブジェクト
+    OBJ_CLASS,
     /// @brief クロージャオブジェクト
     OBJ_CLOSURE,
     /// @brief 関数オブジェクト
     OBJ_FUNCTION,
+    /// @brief インスタンスオブジェクト
+    OBJ_INSTANCE,
     /// @brief ネイティブ関数オブジェクト
     OBJ_NATIVE,
     /// @brief 文字列
@@ -102,6 +123,44 @@ typedef struct {
     int upvalue_count;
 } ObjClosure;
 
+/// @brief クラスオブジェクト
+typedef struct {
+    Obj obj;
+    /// @brief 名前
+    ObjString* name;
+    /// @brief メソッド表
+    Table methods;
+} ObjClass;
+
+/// @brief インスタンスオブジェクト
+typedef struct {
+    Obj obj;
+    /// @brief クラスオブジェクト
+    ObjClass* class_;
+    /// @brief フィールド
+    Table fields;
+} ObjInstance;
+
+/// @brief 束縛メソッドオブジェクト
+typedef struct {
+    Obj obj;
+    /// @brief メソッドがアクセスされたインスタンス
+    Value receiver;
+    /// @brief クロージャ
+    ObjClosure* method;
+} ObjBoundMethod;
+
+/// @brief 新しい束縛メソッドオブジェクトを作る
+/// @param receiver メソッドがアクセスされたインスタンス
+/// @param method クロージャ
+/// @return 新しい束縛メソッドオブジェクト
+ObjBoundMethod* new_bound_method(Value receiver, ObjClosure* method);
+
+/// @brief 新しいクラスオブジェクトを作る
+/// @param name クラスの名前
+/// @return 新しいクラスオブジェクト
+ObjClass* new_class(ObjString* name);
+
 /// @brief 関数オブジェクトから新しいクロージャオブジェクトを作る
 /// @param function 関数オブジェクト
 /// @return 新しいクロージャオブジェクト
@@ -110,6 +169,10 @@ ObjClosure* new_closure(ObjFunction* function);
 /// @brief 新しい関数オブジェクトを作る
 /// @return 新しい関数
 ObjFunction* new_function();
+
+/// @brief 新しいインスタンスオブジェクトを作る
+/// @return 新しいインスタンスオブジェクト
+ObjInstance* new_instance(ObjClass* class_);
 
 /// @brief 新しいネイティブ関数オブジェクトを作る
 /// @param function 新しいネイティブ関数

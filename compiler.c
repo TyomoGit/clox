@@ -73,6 +73,10 @@ typedef struct {
 typedef enum {
     /// @brief 関数
     TYPE_FUNCTION,
+    /// @brief 初期化子
+    TYPE_INITIALIZER,
+    /// @brief メソッド
+    TYPE_METHOD,
     /// @brief トップレベル
     TYPE_SCRIPT,
 } FunctionType;
@@ -95,11 +99,18 @@ typedef struct Compiler {
     int scope_depth;
 } Compiler;
 
+typedef struct ClassCompiler {
+    struct ClassCompiler* enclosing;
+} ClassCompiler;
+
 /// @brief 唯一のパーサ
 Parser parser;
+/// @brief 現在のコンパイラ
 Compiler* current = NULL;
 /// @brief 現在のチャンク
 Chunk* compiling_chunk;
+/// @brief 現在の最も内側にあるクラス
+ClassCompiler* current_class;
 
 /// @brief 現在のチャンクを返す
 /// @return 現在のチャンク
@@ -221,7 +232,13 @@ static int emit_jump(uint8_t instruction) {
 
 /// @brief OP_RETURNをチャンクに加える
 static void emit_return() {
-    emit_byte(OP_NIL);
+    if (current->type == TYPE_INITIALIZER) {
+        // init()内の場合はthis（インスタンス）を返す
+        emit_bytes(OP_GET_LOCAL, 0);
+    } else {
+        emit_byte(OP_NIL);
+    }
+
     emit_byte(OP_RETURN);
 }
 
@@ -471,9 +488,27 @@ static void binary(bool can_assign) {
 
 /// @brief 関数呼び出しを解析する
 /// @param canAssign 
-static void call(bool canAssign) {
+static void call(bool can_assign) {
     uint8_t arg_count = argument_list();
     emit_bytes(OP_CALL, arg_count);
+}
+
+/// @brief ドット演算子を解析する
+/// @param can_assign 
+static void dot(bool can_assign) {
+    consume(TOKEN_IDENTIFIER, "Expect property name after '.'.");
+    uint8_t name = identifier_constant(&parser.previous);
+
+    if (can_assign && match(TOKEN_EQUAL)) {
+        expression();
+        emit_bytes(OP_SET_PROPERTY, name);
+    } else if (match(TOKEN_LEFT_PAREN)) {
+        uint8_t arg_count = argument_list();
+        emit_bytes(OP_INVOKE, name);
+        emit_byte(arg_count);
+    } else {
+        emit_bytes(OP_GET_PROPERTY, name);
+    }
 }
 
 /// @brief リテラルを解析する
@@ -545,8 +580,14 @@ static void init_compiler(Compiler* compiler, FunctionType type) {
     current->local_count += 1;
     local->depth = 0;
     local->is_captured = false;
-    local->name.start = "";
-    local->name.length = 0;
+    
+    if (type != TYPE_FUNCTION) {
+        local->name.start = "this";
+        local->name.length = 4;
+    } else {
+        local->name.start = "";
+        local->name.length = 0;
+    }
 }
 
 /// @brief 数値リテラルを解析する
@@ -620,6 +661,15 @@ static void variable(bool can_assign) {
     named_variable(parser.previous, can_assign);
 }
 
+static void this_(bool can_assign) {
+    if (current_class == NULL) {
+        error("Can't use 'this' outside of a class.");
+        return;
+    }
+
+    variable(false);
+}
+
 static void unary(bool can_assign) {
     TokenType operator_type = parser.previous.type;
 
@@ -639,7 +689,7 @@ ParseRule rules[] = {
     [TOKEN_LEFT_BRACE]    = {NULL,     NULL,   PREC_NONE}, 
     [TOKEN_RIGHT_BRACE]   = {NULL,     NULL,   PREC_NONE},
     [TOKEN_COMMA]         = {NULL,     NULL,   PREC_NONE},
-    [TOKEN_DOT]           = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_DOT]           = {NULL,     dot,   PREC_CALL},
     [TOKEN_MINUS]         = {unary,    binary, PREC_TERM},
     [TOKEN_PLUS]          = {NULL,     binary, PREC_TERM},
     [TOKEN_SEMICOLON]     = {NULL,     NULL,   PREC_NONE},
@@ -668,7 +718,7 @@ ParseRule rules[] = {
     [TOKEN_PRINT]         = {NULL,     NULL,   PREC_NONE},
     [TOKEN_RETURN]        = {NULL,     NULL,   PREC_NONE},
     [TOKEN_SUPER]         = {NULL,     NULL,   PREC_NONE},
-    [TOKEN_THIS]          = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_THIS]          = {this_,    NULL,   PREC_NONE},
     [TOKEN_TRUE]          = {literal,  NULL,   PREC_NONE},
     [TOKEN_VAR]           = {NULL,     NULL,   PREC_NONE},
     [TOKEN_WHILE]         = {NULL,     NULL,   PREC_NONE},
@@ -755,6 +805,53 @@ static void function(FunctionType type) {
         // オペランド2: 上位値のインデックス
         emit_byte(compiler.upvalues[i].index);
     }
+}
+
+/// @brief メソッド宣言を解析する
+static void method() {
+    consume(TOKEN_IDENTIFIER, "Expect method name.");
+    uint8_t constant = identifier_constant(&parser.previous);
+
+    FunctionType type = TYPE_METHOD;
+    if (
+        parser.previous.length == 4
+        && memcmp(parser.previous.start, "init", 4) == 0
+    ) {
+        type = TYPE_INITIALIZER;
+    }
+
+    function(type);
+
+    emit_bytes(OP_METHOD, constant);
+}
+
+/// @brief クラス宣言を解析する
+static void class_declaration() {
+    consume(TOKEN_IDENTIFIER, "Expect class name.");
+
+    Token class_name = parser.previous;
+    uint8_t name_constant = identifier_constant(&parser.previous);
+    declare_variable();
+
+    emit_bytes(OP_CLASS, name_constant);
+    define_variable(name_constant);
+
+    ClassCompiler class_compiler;
+    class_compiler.enclosing = current_class;
+    current_class = &class_compiler;
+
+    named_variable(class_name, false);
+
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+        method();
+    }
+
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
+    emit_byte(OP_POP);
+
+    current_class = current_class->enclosing;
 }
 
 /// @brief 関数宣言を解析する
@@ -878,6 +975,10 @@ static void return_statement() {
     if (match(TOKEN_SEMICOLON)) {
         emit_return();
     } else {
+        if (current->type == TYPE_INITIALIZER) {
+            error("Can't return a value from an initializer.");
+        }
+
         expression();
         consume(TOKEN_SEMICOLON, "Expect ';' after return value.");
         emit_byte(OP_RETURN);
@@ -929,6 +1030,8 @@ static void synchronize() {
 static void declaration() {
     if (match(TOKEN_FUN)) {
         fun_declaration();
+    } else if (match(TOKEN_CLASS)) {
+        class_declaration();
     } else if (match(TOKEN_VAR)) {
         var_declaration();
     } else {

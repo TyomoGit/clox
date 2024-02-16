@@ -25,6 +25,10 @@ typedef enum {
     OP_GET_UPVALUE,
     // 上位値に代入する
     OP_SET_UPVALUE,
+    // フィールドに代入する
+    OP_GET_PROPERTY,
+    // プロパティを取得する
+    OP_SET_PROPERTY,
     // グローバル変数を取得する
     OP_GET_GLOBAL,
     // グローバル変数を定義する
@@ -59,12 +63,18 @@ typedef enum {
     OP_LOOP,
     // コール
     OP_CALL,
+    // インスタンスのプロパティを取得してコールする
+    OP_INVOKE,
     // クロージャを作成する
     OP_CLOSURE,
     // スタックのトップにある上位値を閉じ，ヒープに移す
     OP_CLOSE_UPVALUE,
     // 関数を抜ける
     OP_RETURN,
+    // クラスオブジェクトを生成する
+    OP_CLASS,
+    // メソッドを生成する
+    OP_METHOD,
 } OpCode;
 
 // 動的配列
