@@ -6,6 +6,7 @@
 #include "common.h"
 #include "value.h"
 
+/// @brief オペコード
 typedef enum {
     // 定数を生成する
     OP_CONSTANT,
@@ -35,6 +36,8 @@ typedef enum {
     OP_DEFINE_GLOBAL,
     // グローバル変数に代入する
     OP_SET_GLOBAL,
+    // スーパークラスを取得する
+    OP_GET_SUPER,
     // ==
     OP_EQUAL,
     // >
@@ -65,6 +68,8 @@ typedef enum {
     OP_CALL,
     // インスタンスのプロパティを取得してコールする
     OP_INVOKE,
+    // スーパークラスのメソッドを取得してコールする
+    OP_SUPER_INVOKE,
     // クロージャを作成する
     OP_CLOSURE,
     // スタックのトップにある上位値を閉じ，ヒープに移す
@@ -73,11 +78,13 @@ typedef enum {
     OP_RETURN,
     // クラスオブジェクトを生成する
     OP_CLASS,
+    // クラスを継承する
+    OP_INHERIT,
     // メソッドを生成する
     OP_METHOD,
 } OpCode;
 
-// 動的配列
+/// @brief 動的配列
 typedef struct {
     // 実際に格納されている要素の数
     int count;

@@ -99,8 +99,12 @@ typedef struct Compiler {
     int scope_depth;
 } Compiler;
 
+/// @brief クラスのコンパイラ
 typedef struct ClassCompiler {
+    /// @brief 上位のクラス
     struct ClassCompiler* enclosing;
+    /// @brief スーパークラスを持つかどうか
+    bool has_superclass;
 } ClassCompiler;
 
 /// @brief 唯一のパーサ
@@ -448,6 +452,8 @@ static void define_variable(uint8_t global) {
     emit_bytes(OP_DEFINE_GLOBAL, global);
 }
 
+/// @brief 引数リストを解析する
+/// @return 引数の個数
 static uint8_t argument_list() {
     uint8_t arg_count = 0;
 
@@ -661,6 +667,43 @@ static void variable(bool can_assign) {
     named_variable(parser.previous, can_assign);
 }
 
+/// @brief 合成トークンを作成する
+/// @param text 名前
+/// @return 合成トークン
+static Token synthetic_token(const char* text) {
+    Token token;
+    token.start = text;
+    token.length = (int)strlen(text);
+    return token;
+}
+
+/// @brief superアクセス式を解析する
+/// @param can_assign 
+static void super_(bool can_assign) {
+    if (current_class == NULL) {
+        error("Can't use 'super' outside of a class.");
+    } else if (!current_class->has_superclass) {
+        error("Can't use 'super' in a class with no superclass.");
+    }
+
+    consume(TOKEN_DOT, "Expect '.' after 'super'.");
+    consume(TOKEN_IDENTIFIER, "Expect superclass method name.");
+    uint8_t name = identifier_constant(&parser.previous);
+
+    // 自クラスをプッシュ
+    named_variable(synthetic_token("this"), false);
+    if (match(TOKEN_LEFT_PAREN)) {
+        uint8_t arg_count = argument_list();
+        named_variable(synthetic_token("super"), false);
+        emit_bytes(OP_SUPER_INVOKE, name);
+        emit_byte(arg_count);
+    } else {
+        // スーパークラスをプッシュ
+        named_variable(synthetic_token("super"), false);
+        emit_bytes(OP_GET_SUPER, name);
+    }
+}
+
 static void this_(bool can_assign) {
     if (current_class == NULL) {
         error("Can't use 'this' outside of a class.");
@@ -717,7 +760,7 @@ ParseRule rules[] = {
     [TOKEN_OR]            = {NULL,     or_,    PREC_OR},
     [TOKEN_PRINT]         = {NULL,     NULL,   PREC_NONE},
     [TOKEN_RETURN]        = {NULL,     NULL,   PREC_NONE},
-    [TOKEN_SUPER]         = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_SUPER]         = {super_,   NULL,   PREC_NONE},
     [TOKEN_THIS]          = {this_,    NULL,   PREC_NONE},
     [TOKEN_TRUE]          = {literal,  NULL,   PREC_NONE},
     [TOKEN_VAR]           = {NULL,     NULL,   PREC_NONE},
@@ -837,8 +880,26 @@ static void class_declaration() {
     define_variable(name_constant);
 
     ClassCompiler class_compiler;
+    class_compiler.has_superclass = false;
     class_compiler.enclosing = current_class;
     current_class = &class_compiler;
+
+    if (match(TOKEN_LESS)) {
+        consume(TOKEN_IDENTIFIER, "Expect superclass name.");
+        variable(false); // スーパークラスをスタックにプッシュ
+
+        if (identifiers_equal(&class_name, &parser.previous)) {
+            error("A class can't inherit from itself.");
+        }
+
+        begin_scope();
+        add_local(synthetic_token("super"));
+        define_variable(0);
+
+        named_variable(class_name, false); // サブクラスをスタックにプッシュ
+        emit_byte(OP_INHERIT);
+        class_compiler.has_superclass = true;
+    }
 
     named_variable(class_name, false);
 
@@ -850,6 +911,10 @@ static void class_declaration() {
 
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
     emit_byte(OP_POP);
+
+    if (current_class->has_superclass) {
+        end_scope();
+    }
 
     current_class = current_class->enclosing;
 }
